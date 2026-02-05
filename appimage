@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+# installs appimages into the appimage_dir and sets up icon and desktop files
+
+appimage_dir="$HOME/Software/AppImages"
+meta_dir="$appimage_dir/.meta"
+
+usage() {
+    file=$(basename $1)
+    echo "usage: $file install file.AppImage"
+    echo "       $file remove name"
+    exit 1
+}
+
+find-file() {
+    basename "$(find -maxdepth 1 -name "$1" | head -1)"
+}
+
+if [[ $# -ne 2 ]]; then
+    usage $0
+fi
+
+mkdir -p $meta_dir
+if [[ $1 = "remove" ]]; then
+    name=$2
+
+    cd $meta_dir
+    if [[ ! -f "$name.meta" ]]; then
+        echo "$name is not installed"
+        exit 1
+    fi
+
+    readarray -t files < "$name.meta"
+
+    for file in ${files[@]}; do
+        if [[ $file == /usr/* ]]; then
+            sudo rm $file
+        else
+            rm $file
+        fi
+        echo "removed $file"
+    done
+    rm $name.meta
+
+    echo -e "\033[32m$name removed\033[m"
+elif [[ $1 = "install" ]]; then
+    file=$2
+    if [ ! -f $file ]; then
+        echo "file '$file' does not exist"
+        exit 1
+    fi
+
+    cp "$file" "$appimage_dir/"
+    cd $appimage_dir
+    chmod +x $file
+
+    ./$file --appimage-extract > /dev/null
+    cd ./squashfs-root
+
+    desktop=$(find-file "*.desktop")
+    # try to find the executable name by checking the Exec line of the desktop file
+    name=$(sed -n 's/Exec=\(.*\)/\1/p' $desktop | awk '{print $(NF-1)}')
+
+    # get the icon
+    icon=$(find-file "*.svg")
+    if [ -z $icon ]; then
+        icon=$(find-file "*.png")
+    fi
+
+    icon_path="/usr/share/pixmaps/$icon"
+    desktop_path="$HOME/.local/share/applications/$desktop"
+    appimage_path="$appimage_dir/$name"
+
+    sudo cp $icon $icon_path
+    cp $desktop $desktop_path
+
+    cd ..
+    mv $file $name
+    rm -rf ./squashfs-root
+
+    # setup metadata file
+    meta_file=./.meta/$name.meta
+    touch $meta_file
+    echo $appimage_path > $meta_file
+    echo $icon_path >> $meta_file
+    echo $desktop_path >> $meta_file
+
+    echo -e "\033[32m$name installed"
+else
+    usage $0
+fi
